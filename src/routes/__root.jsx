@@ -12,9 +12,6 @@ export const Route = createRootRoute({
     ],
     links: [
       { rel: 'stylesheet', href: stylesheet },
-      { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
-      { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossOrigin: 'anonymous' },
-      { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter+Tight:wght@400;500;600;700&display=swap' },
     ],
   }),
   component: Root,
