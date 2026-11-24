@@ -1,5 +1,6 @@
-@import '@fontsource-variable/fraunces/latin.css';
-@import '@fontsource-variable/inter-tight/latin.css';
+@import '@fontsource-variable/fraunces/wght.css';
+@import '@fontsource-variable/fraunces/wght-italic.css';
+@import '@fontsource-variable/inter-tight/wght.css';
 
 :root {
   color-scheme: light;

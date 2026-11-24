@@ -6,7 +6,7 @@ import { defineConfig } from 'vite'
 export default defineConfig({
   plugins: [
     cloudflare({ viteEnvironment: { name: 'ssr' } }),
-    tanstackStart({ router: { generatedRouteTree: 'routeTree.gen.js', disableTypes: true } }),
+    tanstackStart(),
     react(),
   ],
 })
