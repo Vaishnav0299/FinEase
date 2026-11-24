@@ -10,7 +10,7 @@
   --ink: #202e27;
   --muted: #565f55;
   --line: #d8dbcf;
-  --field-line: #a3aa9c;
+  --field-line: #808979;
   --green: #214f3c;
   --on-green: #fffef3;
   --green-soft: #dfebdc;
@@ -215,6 +215,13 @@ button, a, input, select, textarea { touch-action: manipulation; }
 .chart-legend li { display: grid; grid-template-columns: 10px 1fr auto; align-items: center; gap: .5rem; font-size: .9rem; margin: .46rem 0; }
 .swatch { width: 9px; height: 9px; border-radius: 3px; }
 .chart-total { grid-column: 1 / -1; border-top: 1px solid var(--line); padding-top: .7rem; font-size: .92rem; }
+.income-panel { margin: 0 0 1.2rem; }
+.split-body { padding: 1.2rem 1.4rem; }
+.split-bar { display: flex; height: 9px; overflow: hidden; border-radius: 4px; margin-bottom: 1rem; }
+.split-figures { display: grid; grid-template-columns: repeat(auto-fit, minmax(128px, 1fr)); gap: .85rem; }
+.split-figures dt { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; font-size: .9rem; color: var(--muted); }
+.split-figures dd { font-size: 1.18rem; font-weight: 570; margin-top: .12rem; }
+.split-body > p { margin-top: 1rem; }
 .summary-strip, .import-bar, .delivery-row, .account-row { padding: 1rem 1.3rem; border: 1px solid var(--line); border-radius: 12px; background: var(--card); }
 .summary-strip { color: var(--green); gap: .7rem; }
 .summary-strip strong { margin-left: auto; color: var(--ink); font: 500 1.65rem var(--display); letter-spacing: -.04em; }

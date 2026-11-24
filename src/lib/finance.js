@@ -109,23 +109,36 @@ export function upcomingCharges(bills, subscriptions, start, end) {
     .sort((a, b) => a.due - b.due || a.name.localeCompare(b.name))
 }
 
+export function incomeSplit(profile) {
+  const income = Math.round(profile.monthly_income * 100)
+  const shares = [profile.savings_pct, profile.investments_pct, profile.bills_pct].map(Number)
+  shares.push(Math.max(0, 100 - shares.reduce((sum, pct) => sum + pct, 0)))
+  const exact = shares.map((pct) => income * pct / 100)
+  const cents = exact.map(Math.floor)
+  // Award the remaining cents to the largest fractional shares, preserving the income total.
+  const priority = exact.map((value, index) => ({ index, remainder: value - cents[index] }))
+    .sort((a, b) => b.remainder - a.remainder)
+  const leftover = income - cents.reduce((sum, amount) => sum + amount, 0)
+  for (const { index } of priority.slice(0, Math.max(0, leftover))) cents[index]++
+  return cents.map((value) => value / 100)
+}
+
 export function computeSummary(profile, bills, subscriptions, today) {
   const payday = nextOnDay(addDays(today, 1), profile.payday_day)
   const charges = upcomingCharges(bills, subscriptions, today, payday)
-  // Calculate the split in minor units so rounding cannot introduce a balance difference.
-  const income = Math.round(profile.monthly_income * 100)
-  const savings = Math.round(income * profile.savings_pct / 100)
-  const investments = Math.round(income * profile.investments_pct / 100)
-  const plannedBills = Math.round(income * profile.bills_pct / 100)
+  const split = incomeSplit(profile)
+  const [savings, investments, plannedBills] = split
+  const afterSavings = Math.round(profile.monthly_income * 100) - Math.round(savings * 100) - Math.round(investments * 100)
   const total = (kind) => charges.filter((row) => row.kind === kind)
     .reduce((sum, row) => sum + Math.round(row.amount * 100), 0)
-  const reserve = Math.max(plannedBills, total('Bill'))
+  const billedCents = total('Bill')
+  const reserve = Math.max(Math.round(plannedBills * 100), billedCents)
   const renewals = total('Subscription')
   return {
     payday, charges, days: daysBetween(today, payday),
-    savings: savings / 100, investments: investments / 100,
+    split, savings, investments, plannedBills, billsDue: billedCents / 100,
     reserve: reserve / 100, renewals: renewals / 100,
-    remaining: (income - savings - investments - reserve - renewals) / 100,
+    remaining: (afterSavings - reserve - renewals) / 100,
   }
 }
 
@@ -157,14 +170,16 @@ export function dueLabel(today, date) {
 }
 
 export function spendingByCategory(workspace, today) {
-  const transactions = workspace.transactions.filter((item) => {
+  const plan = Array.isArray(workspace) ? { transactions: workspace, bills: [], subscriptions: [] } : (workspace ?? {})
+  const txList = plan.transactions ?? []
+  const transactions = txList.filter((item) => {
     const date = parseDay(item.date)
-    return item.direction !== 'credit' && date >= addDays(today, -29) && date <= today
+    return item.direction !== 'credit' && today && date >= addDays(today, -29) && date <= today
   })
-  const imported = workspace.transactions.length > 0
+  const imported = txList.length > 0
   const records = imported ? transactions : [
-    ...workspace.bills.filter((item) => item.active),
-    ...workspace.subscriptions.filter((item) => ACTIVE_SUBSCRIPTIONS.has(item.status))
+    ...(plan.bills ?? []).filter((item) => item.active),
+    ...(plan.subscriptions ?? []).filter((item) => ACTIVE_SUBSCRIPTIONS.has(item.status))
       .map((item) => ({ ...item, amount: monthlyEquivalent(item) })),
   ]
   const totals = new Map()

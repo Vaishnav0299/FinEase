@@ -4,7 +4,6 @@ import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tan
 import { Bell, CalendarDays, ChevronRight, CircleHelp, CreditCard, FolderClosed, LayoutDashboard, LogOut, Menu, Monitor, Moon, ReceiptText, Settings2, Sun, X } from 'lucide-react'
 import { localDay } from '../lib/finance.js'
 import { readPlan, changePlan, localFile } from '../lib/local-store.js'
-import { appId, cloudPlan, entities, platformClient } from '../lib/platform.js'
 
 const Workspace = createContext(null)
 export const useWorkspace = () => useContext(Workspace)
@@ -28,10 +27,10 @@ function WorkspaceState({ children }) {
   const [today, setToday] = useState(null)
   const channel = useRef(null)
   useEffect(() => {
-    let initialMode = appId ? 'cloud' : 'local'
+    let initialMode = 'local'
     let selectedTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
     try {
-      if (!appId && sessionStorage.getItem('finease-example') === 'yes') initialMode = 'example'
+      if (sessionStorage.getItem('finease-example') === 'yes') initialMode = 'example'
       selectedTheme = localStorage.getItem('finease-theme') || selectedTheme
     } catch { /* The theme can still be changed when preferences cannot be stored. */ }
     setMode(initialMode)
@@ -53,70 +52,39 @@ function WorkspaceState({ children }) {
 
   useEffect(() => { document.documentElement.dataset.theme = theme }, [theme])
 
-  const session = useQuery({
-    queryKey: ['session'], enabled: mode === 'cloud',
-    queryFn: async () => {
-      const client = await platformClient()
-      if (!client.auth.hasToken()) return null
-      try { return await client.auth.me() }
-      catch (error) {
-        if (error.status === 401 || error.status === 403) return null
-        throw error
-      }
-    },
-  })
-  const user = session.data
-  const queryKey = ['plan', mode, user?.id ?? 'browser']
+  const queryKey = ['plan', mode]
   const plan = useQuery({
     queryKey,
-    enabled: !!mode && (mode !== 'cloud' || !!user),
-    queryFn: async () => mode === 'cloud' ? cloudPlan(await platformClient(), user.id) : readPlan(mode),
+    enabled: !!mode,
+    queryFn: () => readPlan(mode),
   })
   const refresh = async () => {
     channel.current?.postMessage('change')
     await cache.invalidateQueries({ queryKey })
   }
   async function save(collection, values, { id, file } = {}) {
-    if (mode === 'cloud') {
-      const client = await platformClient()
-      const api = client.entities[entities[collection]]
-      if (collection === 'profile') {
-        await api.upsert([{ ...values, profile_key: user.id }], { key: 'profile_key' })
-      } else if (id) await api.update(id, values)
-      else await api.create(values)
-    } else {
-      await changePlan(mode, (data, files) => {
-        if (collection === 'profile') { data.profile = values; return }
-        const key = id ?? crypto.randomUUID()
-        if (file) files.put(file, mode + '/' + key)
-        if (!id) { data[collection].push({ ...values, id: key }); return }
-        const index = data[collection].findIndex((entry) => entry.id === id)
-        if (index < 0) throw new Error('This item was removed. Refresh to see the current list.')
-        data[collection][index] = { ...data[collection][index], ...values }
-      })
-    }
+    await changePlan(mode, (data, files) => {
+      if (collection === 'profile') { data.profile = values; return }
+      const key = id ?? crypto.randomUUID()
+      if (file) files.put(file, mode + '/' + key)
+      if (!id) { data[collection].push({ ...values, id: key }); return }
+      const index = data[collection].findIndex((entry) => entry.id === id)
+      if (index < 0) throw new Error('This item was removed. Refresh to see the current list.')
+      data[collection][index] = { ...data[collection][index], ...values }
+    })
     await refresh()
   }
   async function remove(collection, id) {
-    if (mode === 'cloud') {
-      const client = await platformClient()
-      await client.entities[entities[collection]].delete(id)
-    } else {
-      await changePlan(mode, (data, files) => {
-        data[collection] = data[collection].filter((item) => item.id !== id)
-        if (collection === 'documents') files.delete(mode + '/' + id)
-      })
-    }
+    await changePlan(mode, (data, files) => {
+      data[collection] = data[collection].filter((item) => item.id !== id)
+      if (collection === 'documents') files.delete(mode + '/' + id)
+    })
     await refresh()
   }
   async function fileUrl(item) {
-    if (mode !== 'cloud') return URL.createObjectURL(await localFile(mode, item.id))
-    const client = await platformClient()
-    const result = await client.integrations.Core.CreateFileSignedUrl({ file_uri: item.file_uri, expires_in: 300 })
-    return result.signed_url
+    return URL.createObjectURL(await localFile(mode, item.id))
   }
   function selectExample(enabled) {
-    if (appId) return
     try { sessionStorage.setItem('finease-example', enabled ? 'yes' : 'no') } catch { /* Session-only selection. */ }
     setMode(enabled ? 'example' : 'local')
   }
@@ -125,11 +93,10 @@ function WorkspaceState({ children }) {
     setTheme(next)
     try { localStorage.setItem('finease-theme', next) } catch { /* Use the in-memory preference. */ }
   }
-  const signedOut = mode === 'cloud' && session.isSuccess && !user
   return (
     <Workspace.Provider value={{
-      workspace: plan.data, mode, today, user, signedOut, theme, toggleTheme,
-      error: session.error ?? plan.error, retry: () => session.error ? session.refetch() : plan.refetch(),
+      workspace: plan.data, mode, today, user: null, signedOut: false, theme, toggleTheme,
+      error: plan.error, retry: () => plan.refetch(),
       save, remove, fileUrl, refresh, selectExample,
     }}>{children}</Workspace.Provider>
   )
@@ -165,7 +132,7 @@ export function WorkspacePage({ children }) {
 }
 
 function Shell({ children }) {
-  const { mode, selectExample, today, user } = useWorkspace()
+  const { mode, selectExample, today } = useWorkspace()
   const pathname = useRouterState({ select: (state) => state.location.pathname })
   const [menu, setMenu] = useState(false)
   const page = navigation.find(([to]) => to === pathname)?.[1] || 'Overview'
@@ -184,7 +151,7 @@ function Shell({ children }) {
           </Link>)}</nav>
         <div className="side-footer">
           {mode === 'example' ? <button className="quiet-button" onClick={() => selectExample(false)}><LogOut size={17} />Leave example</button>
-            : <div className="side-status"><Monitor size={16} />{user ? 'Signed in' : 'Saved in this browser'}</div>}
+            : <div className="side-status"><Monitor size={16} />Saved in this browser</div>}
         </div>
       </div>
     </aside>

@@ -39,7 +39,7 @@ function RecordEditor({ isBill, record, onClose, onDelete }) {
   }
   const payment = record && (webLink(item.payment_link) || bankLink(workspace.profile.bank_link_template, item.amount, workspace.profile.currency))
   return <Modal title={(record ? 'Edit ' : 'Add ') + kind} onClose={onClose} busy={busy}>
-    <form onSubmit={submit}><div className="modal-fields">
+    <form onSubmit={submit}><fieldset className="modal-fields" disabled={busy}>
       <Field label={isBill ? 'Bill name' : 'Subscription name'}><input name="name" autoFocus required maxLength="120" defaultValue={item.name}
         placeholder={isBill ? 'e.g. Home internet' : 'e.g. Music plan'} /></Field>
       <div className="field-grid"><Field label={'Amount (' + workspace.profile.currency + ')'}><input name="amount" type="number" min="0.01" max="999999999999" step="0.01" required defaultValue={item.amount} /></Field>
@@ -60,7 +60,7 @@ function RecordEditor({ isBill, record, onClose, onDelete }) {
       <Field label="Notes (optional)"><textarea name="notes" maxLength="2000" rows="2" defaultValue={item.notes} /></Field>
       {record && isBill && payment && <a className="action-link" href={payment} target="_blank" rel="noopener noreferrer">Open payment link for {money(item.amount, workspace.profile.currency)}</a>}
       {record && !isBill && webLink(item.cancellation_url) && <a className="action-link" href={webLink(item.cancellation_url)} target="_blank" rel="noopener noreferrer">Manage with provider</a>}
-    </div><ErrorLine>{error}</ErrorLine><div className="modal-actions">
+    </fieldset><ErrorLine>{error}</ErrorLine><div className="modal-actions">
       {record && <button type="button" className="text-button danger-text" disabled={busy} onClick={onDelete}>Delete {kind}</button>}
       <button className="button primary" disabled={busy}>{busy ? 'Saving…' : record ? 'Save changes' : 'Add ' + kind}</button>
     </div></form>
@@ -137,6 +137,6 @@ export function Records({ type }) {
     {groups.filter(([, items]) => items.length).map(([title, items]) => <RecordGroup key={title} title={title} rows={items} currency={currency}
       today={today} isBill={isBill} onEdit={select} busy={busy} onStatus={(row, status) => run(() => save(type, { status, flagged_reason: '' }, { id: row.id }))} />)}
     {deleting && activeRecord ? <ConfirmRemove name={activeRecord.name} onClose={() => select(null)} onRemove={() => remove(type, activeRecord.id)} />
-      : (adding || activeRecord) && <RecordEditor isBill={isBill} record={activeRecord} onClose={() => select(null)} onDelete={() => setDeleting(true)} />}
+      : (adding || activeRecord) && <RecordEditor key={activeRecord?.id ?? 'new'} isBill={isBill} record={activeRecord} onClose={() => select(null)} onDelete={() => setDeleting(true)} />}
   </>
 }

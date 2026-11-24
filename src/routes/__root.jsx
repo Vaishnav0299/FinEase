@@ -1,4 +1,4 @@
-import { createRootRoute, HeadContent, Outlet, Scripts } from '@tanstack/react-router'
+import { createRootRoute, HeadContent, Link, Outlet, Scripts } from '@tanstack/react-router'
 import { WorkspaceProvider } from '../components/workspace.jsx'
 import stylesheet from '../styles.css?url'
 
@@ -15,6 +15,11 @@ export const Route = createRootRoute({
     ],
   }),
   component: Root,
+  errorComponent: ({ error }) => <main className="status-screen"><h1>Something went wrong</h1>
+    <p role="alert">{error?.message || 'An unexpected error occurred.'}</p>
+    <Link className="button primary" to="/">Open my plan</Link></main>,
+  notFoundComponent: () => <main className="status-screen"><h1>Page not found</h1>
+    <Link className="button primary" to="/">Open my plan</Link></main>,
 })
 
 function Root() {

@@ -1,7 +1,8 @@
 node_modules/
-.npm-cache/
 dist/
-.wrangler/
 .tanstack/
+.wrangler/
+.npm-cache/
 .env*
 !.env.example
+test

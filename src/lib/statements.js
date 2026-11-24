@@ -1,4 +1,4 @@
-import { addDays, dayInput, daysBetween, onMonthDay, parseDay } from './finance.js'
+import { addDays, dayInput, daysBetween, onMonthDay, parseDay, webLink } from './finance.js'
 
 function readCsv(text) {
   const rows = []
@@ -38,7 +38,7 @@ export function parseCsv(text, positiveIsDebit = true) {
     const amount = Number(raw)
     const cycle = row.cycle?.toLowerCase() || ''
     const direction = row.direction?.toLowerCase() || ((amount > 0) === positiveIsDebit ? 'debit' : 'credit')
-    if (cells.length !== keys.length || !row.merchant || !Number.isFinite(parseDay(row.date)) ||
+    if (cells.length !== keys.length || !row.merchant || row.merchant.length > 200 || row.category?.length > 80 || !Number.isFinite(parseDay(row.date)) ||
       !/^[+-]?\d+(\.\d{1,2})?$/.test(raw) || !Number.isFinite(amount) || !amount || Math.abs(amount) > 999999999999 ||
       !['debit', 'credit'].includes(direction) || (cycle && !cycles.includes(cycle))) {
       throw new Error('Check row ' + (index + 2) + '. Use an ISO date, merchant, non-zero amount and valid direction or cycle.')
@@ -59,7 +59,7 @@ function inferredCycle(history) {
   return windows.find(([, low, high]) => gaps.every((gap) => gap >= low && gap <= high))?.[0] || ''
 }
 
-export function planImport(workspace, rows, source) {
+export function planImport(workspace, rows, source, renewals = []) {
   const known = new Set(workspace.transactions.map((row) => row.import_key))
   const ordinal = new Map()
   const transactions = []
@@ -79,16 +79,15 @@ export function planImport(workspace, rows, source) {
     if (!byMerchant.has(key)) byMerchant.set(key, [])
     byMerchant.get(key).push(row)
   }
-  const subscriptions = []
+  const updates = new Map()
+  const recurring = new Set()
   for (const [key, history] of byMerchant) {
     history.sort((a, b) => a.date.localeCompare(b.date))
     const latest = history.at(-1)
     const existing = workspace.subscriptions.find((item) => merchantKey(item.name) === key)
     const cycle = inferredCycle(history) || existing?.cycle
     if (!cycle) continue
-    for (const row of transactions) {
-      if (merchantKey(row.merchant) === key && row.direction === 'debit') row.is_recurring = true
-    }
+    recurring.add(key)
     if (existing?.last_seen_date && existing.last_seen_date >= latest.date) continue
     const day = parseDay(latest.date)
     const due = cycle === 'weekly' ? addDays(day, 7) : onMonthDay(day, { monthly: 1, quarterly: 3, yearly: 12 }[cycle], new Date(day).getUTCDate())
@@ -102,7 +101,33 @@ export function planImport(workspace, rows, source) {
       flagged_reason: flagged || '', last_seen_date: latest.date, source: existing?.source || 'statement',
     }
     if (increased) values.previous_amount = oldPrice
-    subscriptions.push({ id: existing?.id, values, merchant_key: key })
+    updates.set(key, { id: existing?.id, values, merchant_key: key })
   }
-  return { transactions, subscriptions }
+  for (const renewal of renewals) {
+    const key = merchantKey(renewal.name)
+    recurring.add(key)
+    const existing = workspace.subscriptions.find((item) => merchantKey(item.name) === key)
+    const evidence = JSON.stringify([renewal.observed_date, renewal.amount, renewal.next_charge_date, renewal.cycle, renewal.trial_end_date])
+    if (existing?.statement_evidence === evidence || (renewal.observed_date && existing?.last_seen_date > renewal.observed_date)) continue
+    const inferred = updates.get(key)?.values
+    const prior = existing?.amount ?? renewal.previous_amount ?? inferred?.previous_amount
+    const increased = prior != null && renewal.amount > prior
+    const reason = increased ? 'Price increased' : renewal.trial_end_date ? 'Trial ending' : existing?.flagged_reason
+    const values = {
+      ...inferred, name: existing?.name ?? renewal.name, amount: renewal.amount, cycle: renewal.cycle,
+      category: renewal.category || existing?.category || 'Other', next_charge_date: renewal.next_charge_date,
+      trial_end_date: renewal.trial_end_date, confidence: renewal.confidence,
+      statement_evidence: evidence, source: existing?.source || 'statement',
+      status: existing?.status === 'cancelled' ? 'cancelled' : (reason || !existing ? 'review' : existing.status),
+      flagged_reason: reason || (existing ? '' : 'Check recurring charge'),
+    }
+    if (renewal.observed_date) values.last_seen_date = renewal.observed_date
+    if (increased) values.previous_amount = prior
+    if (webLink(renewal.cancellation_url)) values.cancellation_url = webLink(renewal.cancellation_url)
+    updates.set(key, { id: existing?.id, merchant_key: key, values })
+  }
+  for (const row of transactions) {
+    if (row.direction === 'debit' && recurring.has(merchantKey(row.merchant))) row.is_recurring = true
+  }
+  return { transactions, subscriptions: Array.from(updates.values()) }
 }

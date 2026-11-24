@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { Link, Navigate, useNavigate } from '@tanstack/react-router'
-import { CalendarDays, Check, CircleDollarSign, LogOut } from 'lucide-react'
+import { Navigate, useNavigate } from '@tanstack/react-router'
+import { CalendarDays, Check, CircleDollarSign } from 'lucide-react'
 import { bankLink, computeSummary, formatDay, money } from '../lib/finance.js'
 import { defaultProfile } from '../lib/workspace.js'
-import { platformClient } from '../lib/platform.js'
 import { PageTitle, StatusScreen, ThemeToggle, useWorkspace, Wordmark } from './workspace.jsx'
 import { ErrorLine, Field, useAction } from './forms.jsx'
 
@@ -33,65 +32,81 @@ function PlanPreview({ draft, workspace, today }) {
   </aside>
 }
 
-function ProfileForm({ setup }) {
-  const { workspace, today, save, selectExample, mode } = useWorkspace()
-  const [draft, setDraft] = useState(() => ({ ...defaultProfile, ...workspace.profile }))
+export function ProfileForm({ setup = false }) {
+  const { workspace, save, mode, selectExample, today } = useWorkspace()
+  const navigate = useNavigate()
+  const [draft, setDraft] = useState(() => ({ ...defaultProfile, ...workspace?.profile }))
   const [step, setStep] = useState(1)
   const [saved, setSaved] = useState(false)
   const { busy, error, run } = useAction()
-  const navigate = useNavigate()
-  const total = splits.reduce((sum, [key]) => sum + Number(draft[key]), 0)
+  const total = splits.reduce((sum, [key]) => sum + (Number(draft[key]) || 0), 0)
   function field(key) {
-    return { name: key, value: draft[key] ?? '', onChange: (event) => {
-      setDraft({ ...draft, [key]: event.target.value }); setSaved(false)
-    } }
+    return {
+      value: draft[key] ?? '',
+      onChange: (event) => {
+        setSaved(false)
+        const next = numericFields.includes(key) ? (event.target.value === '' ? '' : Number(event.target.value)) : event.target.value
+        setDraft({ ...draft, [key]: next })
+      },
+    }
   }
-  function submit(event) {
-    event.preventDefault()
-    if (setup && step === 1) { setStep(2); return }
-    run(async () => {
-      if (total > 100) throw new Error('Your allocations must add up to 100% or less.')
-      if (draft.bank_link_template && !bankLink(draft.bank_link_template.trim(), 1, draft.currency)) {
-        throw new Error('Use an HTTPS or payment app link and include {amount} where the amount belongs.')
-      }
-      const profile = Object.fromEntries(Object.keys(defaultProfile).map((key) =>
-        [key, numericFields.includes(key) ? Number(draft[key]) : draft[key].trim()]))
-      await save('profile', profile)
-      if (setup) await navigate({ to: '/' })
-      else setSaved(true)
-    })
+  async function submit() {
+    if (setup && step === 1) {
+      if (!Number(draft.monthly_income) || Number(draft.monthly_income) <= 0) throw new Error('Enter your monthly take-home pay.')
+      setStep(2); return
+    }
+    if (total > 100) throw new Error('Allocations must total 100% or less.')
+    if (draft.bank_link_template && !bankLink(draft.bank_link_template, 100, draft.currency)) {
+      throw new Error('Check the bank link template: use {amount} and an http, https or approved payment scheme.')
+    }
+    const values = {
+      ...draft,
+      monthly_income: Math.round(Number(draft.monthly_income)),
+      payday_day: Math.min(31, Math.max(1, Number(draft.payday_day) || 1)),
+      alert_window_days: Number(draft.alert_window_days) || 7,
+      bank_link_template: String(draft.bank_link_template || '').trim(),
+    }
+    for (const [key] of splits) values[key] = Math.max(0, Math.min(100, Number(draft[key]) || 0))
+    await save('profile', values)
+    setSaved(true)
+    if (setup) navigate({ to: '/' })
   }
-  const details = !setup || step === 1
-  const allocations = !setup || step === 2
-  return <div className={'profile-layout ' + (setup ? 'setup-profile' : '')}>
-    <form onSubmit={submit} className="profile-form">
-      {setup && <div className="step-marker"><span>Payday setup</span><span>Step {step} of 2</span><div aria-hidden="true"><i /><i className={step === 2 ? 'filled' : ''} /></div></div>}
-      {setup && <header className="form-heading"><h1>{step === 1 ? 'Plan around payday.' : 'Set money aside.'}</h1>
-        <p>{step === 1 ? 'Start with your take-home pay. FinEase uses it to work out what you can spend before your next payday.'
-          : 'Choose how much of each paycheque goes to savings, investments and bills.'}</p></header>}
-      {details && <fieldset><legend>{setup ? 'Your income' : 'Payday profile'}</legend>
-        <Field label="Monthly take-home pay"><input type="number" min="0.01" max="999999999999" step="0.01" inputMode="decimal" required
-          placeholder="e.g. 50,000" {...field('monthly_income')} /></Field>
-        <div className="field-grid"><Field label="Currency"><select {...field('currency')}>
-          {Object.entries(currencies).map(([code, name]) => <option key={code} value={code}>{code} · {name}</option>)}
-        </select></Field><Field label="Payday each month"><select {...field('payday_day')}>
-          {Array.from({ length: 31 }, (_, i) => <option key={i} value={i + 1}>Day {i + 1}</option>)}</select></Field></div>
+  const income = setup ? step === 1 : true
+  const allocations = setup ? step === 2 : true
+  return <div className="profile-layout">
+    <form className="profile-form" onSubmit={(event) => { event.preventDefault(); run(submit) }}>
+      {setup && <div className="step-marker" aria-label={'Step ' + step + ' of 2'}>
+        <span>Step {step} of 2</span><span>{step === 1 ? 'Income & payday' : 'Allocations'}</span>
+        <div><i className="filled" /><i className={step === 2 ? 'filled' : ''} /></div>
+      </div>}
+      <header className="form-heading">
+        <h1>{setup ? (step === 1 ? 'Set up your payday profile' : 'Divide your income') : 'Your payday profile'}</h1>
+        <p>{setup ? (step === 1 ? 'FinEase calculates what is genuinely safe to spend between paydays.'
+          : 'Choose what percentage of take-home pay is set aside before you spend.')
+          : 'Your safe-to-spend figure adjusts as you change your income, payday or allocations.'}</p>
+      </header>
+      {income && <fieldset disabled={busy}><legend>Income details</legend>
+        <div className="field-grid"><Field label="Monthly take-home pay"><input required type="number" min="1" max="999999999" step="1"
+          placeholder="e.g. 75000" {...field('monthly_income')} /></Field>
+          <Field label="Currency"><select {...field('currency')}>
+            {Object.entries(currencies).map(([code, name]) => <option key={code} value={code}>{code} · {name}</option>)}
+          </select></Field></div>
+        <Field label="Payday"><select {...field('payday_day')}>
+          {Array.from({ length: 31 }, (_, i) => i + 1).map((day) => <option key={day} value={day}>{day === 1 ? '1st of every month' : day === 2 ? '2nd' : day === 3 ? '3rd' : day + 'th of every month'}</option>)}
+        </select></Field>
       </fieldset>}
-      {allocations && <><fieldset><legend>Monthly allocations</legend><div className="field-grid thirds">
-        {splits.map(([key, label]) => <Field key={key} label={label + ' (%)'}><input required type="number"
-          min="0" max="100" step="0.01" {...field(key)} /></Field>)}</div>
-        <span className={'form-note ' + (total > 100 ? 'negative' : '')}>
-          {total > 100 ? 'Reduce allocations by ' + (total - 100).toFixed(2) + ' percentage points.'
-            : Number((100 - total).toFixed(2)) + '% left before renewals.'}</span>
-      </fieldset><fieldset><legend>Reminders and payments</legend>
+      {allocations && <><fieldset disabled={busy}><legend>Monthly split</legend>
+        <div className="field-grid thirds">{splits.map(([key, label]) => <Field key={key} label={label + ' (%)'}>
+          <input required type="number" min="0" max="100" step="1" {...field(key)} /></Field>)}</div>
+        <span className={total > 100 ? 'danger-text' : 'form-note'}>{total}% allocated{total > 100 ? ' · total must be 100% or less.'
+          : Number((100 - total).toFixed(2)) + '% left before renewals.'}</span>
+      </fieldset><fieldset disabled={busy}><legend>Reminders and payments</legend>
         <Field label="Remind me before an item is due"><select {...field('alert_window_days')}>
           {[1, 3, 7, 14, 30].map((days) => <option key={days} value={days}>{days} {days === 1 ? 'day' : 'days'} ahead</option>)}
         </select></Field>
         <Field label="Bank app link (optional)" hint="Put {amount} in the link where your banking app expects the payment amount.">
           <input type="text" maxLength="2000" placeholder="upi://pay?…&am={amount}" {...field('bank_link_template')} />
         </Field>
-        {mode === 'cloud' && <Field label="WhatsApp number (optional)" hint="Include your country code.">
-          <input type="tel" pattern={'\\+[1-9][0-9]{6,14}'} {...field('whatsapp_number')} /></Field>}
       </fieldset></>}
       <ErrorLine>{error}</ErrorLine>
       <div className="form-actions">{setup && step === 2 && <button type="button" className="button outline"
@@ -107,19 +122,15 @@ function ProfileForm({ setup }) {
 }
 
 export function Setup() {
-  const { workspace, signedOut, error, retry, mode } = useWorkspace()
+  const { workspace, signedOut, error, retry } = useWorkspace()
   if (signedOut) return <Navigate to="/login" replace />
   if (error || !workspace) return <StatusScreen error={error} retry={retry} />
   if (workspace.profile) return <Navigate to="/" replace />
   return <div className="setup-page"><header className="setup-bar"><Wordmark /><div>
-    <span>{mode === 'cloud' ? 'Account setup' : 'Local workspace'}</span><ThemeToggle /></div></header>
+    <span>Local workspace</span><ThemeToggle /></div></header>
     <main className="setup-main"><ProfileForm setup /></main></div>
 }
 
 export function Settings() {
-  const { mode, user } = useWorkspace()
-  return <><PageTitle title="Settings">Adjust your payday plan and reminder window.</PageTitle><ProfileForm />
-    {mode === 'cloud' && <div className="account-row"><span>{user?.email}</span>
-      <button className="button outline" onClick={async () => (await platformClient()).auth.logout('/login')}><LogOut size={16} />Sign out</button></div>}
-  </>
+  return <><PageTitle title="Settings">Adjust your payday plan and reminder window.</PageTitle><ProfileForm /></>
 }
